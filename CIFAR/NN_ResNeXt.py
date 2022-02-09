@@ -109,18 +109,20 @@ class Net_ResNext(pl.LightningModule):
     #=========
     # Forward
     #========= 
-    def forward(self, x, targets, mask_subNNs_scheme = None): 
-        # If mask_subNNs_scheme is used in test/validation mode (when there is also no dropSubNN):
-        #     - a tupple (i, k, 'remove_active') then from the i-th ResNeXt block (starting the counting from 0)
-        #       k randomly chosen subNNs out of the set of 'active' for the classes will be removed. The set of
-        #       active is determined by seeing from 'targets' the class of the input image and choosing the 
-        #       corresponding subset from the coding scheme.
-        #     - a tupple (i, k, 'remove_inactive') instead of 'active' is given then k subNNs will be randomly 
-        #       removed from the set of corresponding inactives ones. 
-        #     - a tupple ('all', 'remove_inactive') then you turn the NN into a binary classifier as only the 
-        #       the subNNs dedicated to the corresponding classes of targets are not masked.
-        #     - None. No masking is applied
-        # In the training mode it is asserted to be None. 
+    def forward(self, x, targets, mask_subNNs_scheme = None):
+        '''
+        If mask_subNNs_scheme is used in test/validation mode (when there is also no dropSubNN):
+             - a tupple (i, k, 'remove_active') then from the i-th ResNeXt block (starting the counting from 0)
+               k randomly chosen subNNs out of the set of 'active' for the classes will be removed. The set of
+               active is determined by seeing from 'targets' the class of the input image and choosing the 
+               corresponding subset from the coding scheme.
+             - a tupple (i, k, 'remove_inactive') instead of 'active' is given then k subNNs will be randomly 
+               removed from the set of corresponding inactives ones. 
+             - a tupple ('all', 'remove_inactive') then you turn the NN into a binary classifier as only the 
+               the subNNs dedicated to the corresponding classes of targets are not masked.
+             - None. No masking is applied
+        In the training mode it is asserted to be None. 
+        '''
         assert not( self.training and mask_subNNs_scheme is not None)
         DecodeEnergies = []
         Losses_disentangle = []
