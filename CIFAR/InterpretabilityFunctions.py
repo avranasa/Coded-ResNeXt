@@ -26,8 +26,14 @@ def test_print_acc_removing_subNNs(indx_block, List_N_subNNs_to_remove, model, d
       
 
 def test_partNN_asBinaryClassifier(model, device,  class_of_model_part, test_loader, train_loader=None, out_of_distr_loader=None):
-    #Takes a model that is for binary classification and tests its performance.
-    MAX_N_SAMPLES_TRAIN = 50000 #Put 50000 for CIFAR10 and if desired less for CIFAR100
+    # Takes a model that is for binary classification and tests its performance. The binary classifier is for the 
+    # class "class_of_model_part". If out_of_distr_loader is given then the performance of the binary classifier is measured
+    # also if negative samples come from the out_of_distr_loader. 
+    MAX_N_SAMPLES_TRAIN = 50000 # If the train_loader is given then to compute the threshold for the binary classifier
+                                # MAX_N_SAMPLES_TRAIN samples will be randomly chosen from training set. The threshold 
+                                # that maximizes the F1-measure in that training subset will be the one used also for
+                                # testing the binary classifier in the validation set.
+                                #Put 50000 for CIFAR10 and if desired less for CIFAR100
     POSITIVES_PERCENTAGE = None #The number of Negative samples we consider is equal to (1/POSITIVES_PERCENTAGE - 1)*N_positives.
                                #So for CIFAR-100 which has 100 validation images used as positives for a class, we will randomly
                                #select (1/0.1 - 1)*100= 900 images as negatives.
@@ -47,7 +53,7 @@ def test_partNN_asBinaryClassifier(model, device,  class_of_model_part, test_loa
         for mode_loader, loader in Modes_loader:
             print('\n========================================')
             print('Forward passes for the loader:  ',mode_loader)            
-            print('========================================')     
+            print('==========================================')     
             
             if mode_loader in ['train', 'test']:
                 ActualPos = []#the binary classifier has to predict True
