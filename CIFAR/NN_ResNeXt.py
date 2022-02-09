@@ -188,8 +188,8 @@ class Net_ResNext(pl.LightningModule):
     def configure_optimizers(self,):
         optimizer = optim.SGD(self.parameters(), lr=self.lr, momentum=self.mom, weight_decay=self.weight_d, nesterov=self.nstv)  
         lr_scheduler = CosineAnnealingLR(optimizer, T_max=self.N_epochs, eta_min=1e-5, verbose=False)
-        #for epoch_pass in range(self.trainer.current_epoch):
-        #    lr_scheduler.step()
+        for epoch_pass in range(self.trainer.current_epoch):
+            lr_scheduler.step()
         return ([optimizer], [lr_scheduler])
          
 
