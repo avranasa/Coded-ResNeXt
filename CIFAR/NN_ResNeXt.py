@@ -177,7 +177,7 @@ class Net_ResNext(pl.LightningModule):
         preds, loss_disentangle_total, Losses_disentangle, predsDecodeEnergies, _ = self.forward(x, targets)
         test_acc = preds.argmax(dim=1).eq(targets).sum().item()/x.shape[0]
         loss_class = self.Compute_classification_loss(preds, targets)
-        self.log("val/acc", test_acc, on_step=False, on_epoch=True, sync_dist=True, prog_bar=True))
+        self.log("val/acc", test_acc, on_step=False, on_epoch=True, sync_dist=True, prog_bar=True)
         self.log("val/loss_classification", loss_class.item(), on_step=False, on_epoch=True, sync_dist=True)
         self.log("val/loss_disentangle_total", loss_disentangle_total.item(), on_step=False, on_epoch=True, sync_dist=True)
         for i, loss_dis_block in enumerate( Losses_disentangle ): 
