@@ -1,7 +1,7 @@
 import torch  
 import matplotlib.pyplot as plt
 import random
-from Helpers_InteretabilityFunctions import Compute_Threshold_for_Best_F1
+from Helpers_InteretabilityFunctions import Compute_Threshold_for_Best_F1, F1score_Presicion_Recall_BallancedAcc
 
 
 def test_print_acc_removing_subNNs(indx_block, List_N_subNNs_to_remove, model, device, test_loader):
