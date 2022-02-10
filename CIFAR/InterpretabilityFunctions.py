@@ -79,23 +79,24 @@ def test_partNN_asBinaryClassifier(model, device,  class_of_model_part, test_loa
                 if mode_loader == 'train' and N_samples > MAX_N_SAMPLES_TRAIN:
                     break
 
-            #Computing the performance of the thresholds and showing the performance of the binary classifier
+           #Computing the performance of the thresholds and showing the performance of the binary classifier
             if mode_loader == 'train':
                 train_thr = Compute_Threshold_for_Best_F1(ActualPos, ActualNeg, POSITIVES_PERCENTAGE)
             elif mode_loader == 'test':
                 Results['test'] = (ActualPos, ActualNeg)
                 test_thr = Compute_Threshold_for_Best_F1(ActualPos, ActualNeg, POSITIVES_PERCENTAGE)
-                axs.hist(ActualPos, density=True, bins=N_bins, alpha=0.5)
-                axs.hist(ActualNeg, density=True, bins=N_bins, alpha=0.5)
+                axs.hist(ActualPos, density=True, bins=N_bins, alpha=0.7, label='In-distribution Positives', color='steelblue')
+                axs.hist(ActualNeg, density=True, bins=N_bins, alpha=0.6, label='In-distribution Negatives', color='brown')
                 _, precision_optimal, recall_optimal, _ = F1score_Presicion_Recall_BallancedAcc(ActualPos, ActualNeg, test_thr, POSITIVES_PERCENTAGE)
                 _, precision, recall,_ = F1score_Presicion_Recall_BallancedAcc(ActualPos, ActualNeg, train_thr,  POSITIVES_PERCENTAGE)
                 print('Precision and recall for optimal threshold ( {0:.4f}, {1:.4f})'.format(precision_optimal, recall_optimal))
                 print('Precision and recall using threshold estimated from training dataset ( {0:.4f}, {1:.4f})'.format(precision, recall))       
             elif mode_loader == 'out_of_distr':
                 Results['out_of_distr'] = ActualNeg
-                axs.hist(ActualNeg, density=True, bins=N_bins, alpha=0.5)
+                axs.hist(ActualNeg, density=True, bins=N_bins, alpha=0.65, label='Out-of-distribution Negatives', color='dimgray')
                 _, precision, recall,_ = F1score_Presicion_Recall_BallancedAcc(ActualPos, ActualNeg, train_thr, POSITIVES_PERCENTAGE)
                 print('----USING OUT OF DISTRIBUTION NEGATIVES----')
                 print('Precision and recall using threshold estimated from training dataset ( {0:.4f}, {1:.4f})'.format(precision,recall)) 
+        axs.legend()
         plt.show()
     return Results
