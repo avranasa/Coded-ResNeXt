@@ -39,7 +39,7 @@ class MyImageNet(ImageFolder):
             targets (list): The class_index value for each image in the dataset
     """
 
-    def __init__(self, root: str, split: str = 'train', download: Optional[str] = None, **kwargs: Any) -> None:
+    def __init__(self, root: str, split: str = 'train', path_2_files: str = '/content/drive/MyDrive/Imagenet', download: Optional[str] = None, **kwargs: Any) -> None:
         if download is True:
             msg = ("The dataset is no longer publicly accessible. You need to "
                    "download the archives externally and place them in the root "
@@ -54,7 +54,7 @@ class MyImageNet(ImageFolder):
         self.split = verify_str_arg(split, "split", ("train", "val"))
 
         #Extract from my google drive address
-        self.PATH_2_FILES = '/content/drive/MyDrive/Imagenet'
+        self.PATH_2_FILES = path_2_files
 
         self.parse_archives()
         wnid_to_classes = load_meta_file(self.root)[0]
@@ -218,9 +218,4 @@ def parse_val_archive( root: str, path_2_file: str, file: Optional[str] = None, 
 
     for wnid, img_file in zip(wnids, images):
         shutil.move(img_file, os.path.join(val_root, wnid, os.path.basename(img_file)))
-
-
-
-
-
 
