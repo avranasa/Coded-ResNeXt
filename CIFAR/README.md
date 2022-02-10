@@ -1,4 +1,4 @@
-In all our experiments we used google's COLAB notebook. The file "Coded_ResNeXt_CIFAR.ipynb" contains the
+In all our experiments we used google's COLAB notebook and implemented with Pytorch Lightning. The file "Coded_ResNeXt_CIFAR.ipynb" contains the
 notebook. Click it and above left there is the option of clicking the box [Open in Colab] which will open a COLAB notebook
 where the models for CIFAR-10 and CIFAR-100 can be trained. The accelarator used was TPU. We also used the High-RAM option (not necessary for CIFAR experiments) but 
 (at the moment) is available only for those with Pro or Pro+ account.
