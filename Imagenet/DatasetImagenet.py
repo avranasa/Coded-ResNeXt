@@ -1,3 +1,5 @@
+#The code is largerly based on: https://github.com/pytorch/vision/blob/main/torchvision/datasets/imagenet.py#
+
 import warnings
 from contextlib import contextmanager
 import os
