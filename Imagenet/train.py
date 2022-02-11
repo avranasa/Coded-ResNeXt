@@ -526,9 +526,10 @@ def setup_train_task(args, dev_env: DeviceEnv, mixup_active: bool):
         LossDisentangle_type = args.LossDisentangle_type,
         Control = args.Control,
         coding_ratio_per_stage = args.coding_ratio_per_stage,
+        dropSubNNs_prob  = args.dp_prob,
         checkpoint_path = args.initial_checkpoint,
     )
-
+    
     if args.num_classes is None:
         assert hasattr(model, 'num_classes'), 'Model must have `num_classes` attr if not set on cmd line/config.'
         args.num_classes = model.num_classes  
