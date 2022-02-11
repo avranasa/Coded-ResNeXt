@@ -70,12 +70,13 @@ parser.add_argument('--coding-ratio-per-stage', nargs= 4, type=str, default = ['
                          'Coded-ResNeXt which has 4 stages, so 4 inputs should be given. Default: 32/32 32/32 16/32 8/32.' )
 parser.add_argument('--only-eval',  action='store_true', default=False,
                     help='If true then it does only one evaluation step. A checkpoint should be provided \n' +\
-                    'for loading the network (default: False)')
-parser.add_argument('--Remove-subNNs-from-block',  action='store_true', default=False,
-                    help='Used for generating the plot where subNNs are removed either from the set of active or  \n'+\
-                    'or from the set of inactive. Calls the function "test_print_acc_removing_subNNs" where the first \n'+\
-                    'two lines define from which block and how many subNNs will be removed. The default block is the 14th. \n'+\
-                    'A checkpoint should be provided for loading the network. (default: False)')
+                        'for loading the network (default: False)')
+parser.add_argument('--Remove-subNNs-from-block', nargs='+', type = int, default=None,
+                    help='If None (the default option) then it plays no role. If two or more integers are given then the first \n'+ \
+                        'integer denotes the index of the block from which subNNs will be removed. Two ways of removing: first from the \n'+\
+                        'set of inactive subNNs and second from the set of active. How many subNNs will be removed is determined by \n'\
+                        'the following integers. For example if it is given: 14 4 7 , then from the 14-th block first 4 subNNs will be  \n'\
+                        'randomly removed in the two ways (per validation sample) and then the experiment will be repeated with 7.')
 parser.add_argument('--BinaryClassifier', type=int, default=-1, 
                     help="Give the class for which its binary classifier will be evaluating. The output of the binary \n"+\
                     'for every image in the evaluation set will be stored in a folder in the output path.')     
@@ -345,7 +346,7 @@ def main():
         print('And the experiment name: ', args.experiment)
         print('===============================')
 
-    if args.Remove_subNNs_from_block or (args.BinaryClassifier>=0):
+    if args.Remove_subNNs_from_block is not None or (args.BinaryClassifier>=0):
         args.only_eval = True
     #================================
 
@@ -411,24 +412,21 @@ def main():
         )
 
     #================================
-    #Some additional functionality. 
     #Mostly used to get the necessary 
     #data for the plots of the paper.
     #================================
     try:
         if args.only_eval:
-            if args.Remove_subNNs_from_block:
+            if args.Remove_subNNs_from_block is not None:
                 test_print_acc_removing_subNNs(
                         train_state.model,
-                        train_state.eval_loss,
                         loader_eval,
+                        args.Remove_subNNs_from_block,
                         services.monitor,
                         dev_env)
             elif args.BinaryClassifier >= 0:
-                Name_process = random.randint(0, 100000)#To give to each process a different number id.
-                    #There is a probability of 99.97% to get all different id numbers. If two processes 
-                    #have identical id number increase the 100000.
-                print(Name_process)
+                Name_process = random.randint(0, 100000)#An easy way to give to each process a different number id.
+                print(Name_process)#8 different numbers must be printed. (TPU has 8 cores) 
                 BinaryClassifierOneClass(
                         train_state.model,
                         loader_eval,
@@ -529,7 +527,7 @@ def setup_train_task(args, dev_env: DeviceEnv, mixup_active: bool):
         dropSubNNs_prob  = args.dp_prob,
         checkpoint_path = args.initial_checkpoint,
     )
-    
+
     if args.num_classes is None:
         assert hasattr(model, 'num_classes'), 'Model must have `num_classes` attr if not set on cmd line/config.'
         args.num_classes = model.num_classes  
@@ -582,7 +580,7 @@ def setup_train_task(args, dev_env: DeviceEnv, mixup_active: bool):
     eval_loss_fn = nn.CrossEntropyLoss()
     dev_env.to_device(train_loss_fn, eval_loss_fn)
 
-    if dev_env.primary:
+    if dev_env.primary and not args.only_eval:
         _logger.info('Scheduled epochs: {}'.format(num_epochs))
 
     train_cfg = TrainCfg(
@@ -915,23 +913,22 @@ def evaluate(
 
 def test_print_acc_removing_subNNs(
         model: nn.Module,
-        loss_fn: nn.Module,
         loader,
+        Indx_Block_ListSubNNs,
         logger: Monitor,
         dev_env: DeviceEnv,
         phase_suffix: str = '',
         log_interval: int = 10,
     ):
-    indx_block = 14
-    List_N_subNNs_to_remove = [1,2,3,4,5,6,7,8]#[i+1 for i in range(1)]
+    indx_block = Indx_Block_ListSubNNs[0]
+    List_N_subNNs_to_remove = Indx_Block_ListSubNNs[1:]
 
     model.eval()
     with torch.no_grad():
-        for remove_type in ['remove_inactive',  'remove_active']:       
-            for k in List_N_subNNs_to_remove:    
+        for k in List_N_subNNs_to_remove:    
+            for remove_type in ['remove_inactive',  'remove_active']:   
                 tracker = Tracker()
-                losses_class_meter = AvgTensor()
-                accuracy_m = AccuracyTopK()  # FIXME move loss and accuracy modules into task specific TaskMetric obj
+                accuracy_m = AccuracyTopK()  
                 
                 end_idx = len(loader) - 1
                 tracker.mark_iter()
@@ -944,7 +941,6 @@ def test_print_acc_removing_subNNs(
                         output, _, _, _ = model(sample, target, mask_subNNs_scheme=(indx_block, k, remove_type))
                         if isinstance(output, (tuple, list)):
                             output = output[0]
-                        loss_class = loss_fn(output, target)
 
                     if dev_env.type_xla:
                         dev_env.mark_step()
@@ -952,25 +948,21 @@ def test_print_acc_removing_subNNs(
                         dev_env.synchronize()
 
                     tracker.mark_iter_step_end()
-                    losses_class_meter.update(loss_class, output.size(0))
                     accuracy_m.update(output, target)
 
                     if last_step or step_idx % log_interval == 0:
                         top1, top5 = accuracy_m.compute().values()
-                        loss_class_avg = losses_class_meter.compute()
                         logger.log_step(
-                            'Eval',
+                            'Eval, {0} {1} subNNs'.format(remove_type, k),
                             step_idx=step_idx,
                             step_end_idx=end_idx,
-                            loss=loss_class_avg.item(),
                             top1=top1.item(),
                             top5=top5.item(),
                             phase_suffix=phase_suffix,
                         )   
-                        
+
                     tracker.mark_iter()
                 top1, top5 = accuracy_m.compute().values()
-                print('If we {0} {1} subNNs the accuracy is {2}'.format(remove_type, k, top1.item()))
 
 
 def BinaryClassifierOneClass(
