@@ -78,8 +78,8 @@ parser.add_argument('--Remove-subNNs-from-block', nargs='+', type = int, default
                         'the following integers. For example if it is given: 14 4 7 , then from the 14-th block first 4 subNNs will be  \n'\
                         'randomly removed in the two ways (per validation sample) and then the experiment will be repeated with 7.')
 parser.add_argument('--BinaryClassifier', type=int, default=-1, 
-                    help="Give the class for which its binary classifier will be evaluating. The output of the binary \n"+\
-                    'for every image in the evaluation set will be stored in a folder in the output path.')     
+                    help='Give the class for which its binary classifier will be evaluating. The output of the binary \n'+\
+                         'for every image in the evaluation set will be stored in a folder created at the output path.')     
 
 
 parser.add_argument('--output', default='/', type=str, metavar='PATH',
@@ -426,7 +426,7 @@ def main():
                         dev_env)
             elif args.BinaryClassifier >= 0:
                 Name_process = random.randint(0, 100000)#An easy way to give to each process a different number id.
-                print(Name_process)#8 different numbers must be printed. (TPU has 8 cores) 
+                #print(Name_process)#8 different numbers must be printed. (TPU has 8 cores) 
                 BinaryClassifierOneClass(
                         train_state.model,
                         loader_eval,
@@ -447,6 +447,7 @@ def main():
     except KeyboardInterrupt:
         pass
     #===============================
+
 
     try:
         for epoch in range(train_state.epoch, train_cfg.num_epochs):
@@ -920,6 +921,10 @@ def test_print_acc_removing_subNNs(
         phase_suffix: str = '',
         log_interval: int = 10,
     ):
+
+    #==============================================================
+    # Implementing the experiment of removing subNNs given a block
+    #==============================================================
     indx_block = Indx_Block_ListSubNNs[0]
     List_N_subNNs_to_remove = Indx_Block_ListSubNNs[1:]
 
@@ -973,6 +978,9 @@ def BinaryClassifierOneClass(
         Name_process: int,
         class_for_BC: int = 0,
     ):
+    #============================================================
+    # Implementing the experiment of testing a Binary Classifier
+    #============================================================
 
     model.eval()
     with torch.no_grad():     
@@ -1003,29 +1011,13 @@ def BinaryClassifierOneClass(
         ListOfOutput = torch.cat(ListOfOutput)
         ListOfTargets = torch.cat(ListOfTargets)
         
-    saving_path = os.path.join(root_saving_path, "BinaryClassifier/class_"+str(class_for_BC))
-    os.makedirs(saving_path, exist_ok = True)
+     
+    saving_path = os.path.join(root_saving_path, "class_"+str(class_for_BC))
+    os.makedirs(saving_path, exist_ok = True)   
     with open(saving_path+'/core_'+ str(Name_process)+'.txt', "wb") as f:
         pickle.dump([ListOfOutput,ListOfTargets], f)
 
-    '''
-    #To plot for example the distribution something like the following should be run:
-    Outputs, Labels, ActualPos, ActualNeg = [],[], [], []
-    for f in glob.iglob('/content/drive/MyDrive/Imagenet-ResNeXt/checkpoints/BinaryClassifier/class_0/*.txt'):
-        with open(f, "rb") as fp:  
-            Out, label = pickle.load(fp)
-            Outputs.append(Out)
-            Labels.append(label)
-    Outputs = torch.cat(Outputs)
-    Labels = torch.cat(Labels)
-    fig, axs = plt.subplots(1, 1, sharey=False, tight_layout=False, figsize = (10,3))
-    for o, l in zip(Outputs, Labels):
-        if l == cl:  ActualPos.append(o)
-        else: ActualNeg.append(o)
-    axs.hist(ActualPos, density=True, bins=15, alpha=0.8, label='In-distribution Positives',color='steelblue')
-    axs.hist(ActualNeg , density=True, bins=40, alpha=0.6, label='In-distribution Negatives', color='brown')
-    plt.show()
-    '''
+  
 
 def _mp_entry(*args):
     main()
