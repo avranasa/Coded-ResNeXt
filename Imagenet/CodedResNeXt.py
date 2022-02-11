@@ -11,10 +11,52 @@ from timm.models.helpers import load_checkpoint
 class CodedResNeXt(nn.Module):
     def __init__(self, **kwargs):
         super( CodedResNeXt, self).__init__()
+        '''
+        'conv7_in3_out64_str2' means a convolution layer with kernel_size (7,7) with stride=2
+                               input's number of channels is 3 and output's is 64
+        Τhe last linear has the number output features equal to the number of classes
+        avgPoolWithMean is an 2D average pool. For input (N,C,H,W) it outputs (N,C)
+        maxPool3_str2_pad1 is a maxPool layer with stride 2, padding 1 and kernel_size (3,3)
+        dropOut_SubNN is applied only if the coding is 'M/N' with M<N
+        
+        The notation regarding the architecture is the following. Each list represents a block as:
+        [Channels_in, Channels_out, Bottleneck_width, stride of the second convolutional, coding ratio]         
+        '''
+        self.control = kwargs.get('Control')
+        d=4
+        if self.control:
+            stage1, stage2, stage3, stage4 = ['32/32']*4
+        else:
+            stage1, stage2, stage3, stage4 = kwargs.get('coding_ratio_per_stage')
+        self.architecture = [ #stem, Input resolution [224,224] / [160,160]
+                        'conv7_in3_out64_str2', 'bn2D_in64', 'relu', 'maxPool3_str2_pad1',
+                        #stage 1 
+                        [  64, 256, d, 1, stage1 ],#Index Block: 0, Resolution [56,56] / [40,40]
+                        [ 256, 256, d, 1, stage1 ],
+                        [ 256, 256, d, 1, stage1 ],                         
+                        #stage 2
+                        [ 256, 512, 2*d, 2, stage2 ],  #Index Block: 3, Resolution [28,28] / [20,20]
+                        [ 512, 512, 2*d, 1, stage2 ],  
+                        [ 512, 512, 2*d, 1, stage2 ],  
+                        [ 512, 512, 2*d, 1, stage2 ],  
+                        #stage 3
+                        [  512, 1024, 4*d, 2, stage3 ],  #Index Block: 7, Resolution [14,14] / [10,10]
+                        [ 1024, 1024, 4*d, 1, stage3 ],  
+                        [ 1024, 1024, 4*d, 1, stage3 ],    
+                        [ 1024, 1024, 4*d, 1, stage3 ],  #Index Block: 10
+                        [ 1024, 1024, 4*d, 1, stage3 ],  
+                        [ 1024, 1024, 4*d, 1, stage3 ],        
+                        #stage 4   
+                        [ 1024, 2048, 8*d, 2,  stage4 ], #Index Block: 13, Resolution [7,7] / [5,5]
+                        [ 2048, 2048, 8*d, 1,  stage4 ],  
+                        [ 2048, 2048, 8*d, 1,  stage4 ],  
+                        #Last layers
+                        'avgPoolWithMean','linear_in2048' ]
+
+        self.dropSubNNs_prob = kwargs.get('dp_prob')
         self.num_classes = 1000
-        self.architecture = kwargs.get('Architecture')
         self.default_cfg = {'architecture':self.architecture,
-                           'control':kwargs.get('Control')}
+                           'control':self.control}
         self.num_codedBlocks = 0
         #create network
         self.net_list, self.net_types = self.MakeListOfModules(**kwargs)
@@ -32,8 +74,8 @@ class CodedResNeXt(nn.Module):
                 Name_block = 'ResNeXt_block_'+str(res_block_counter)
                 List_types.append(Name_block)
                 res_block_counter += 1
-                N_channels_in, N_channels_out, Bottleneck_d, stride, coding_scheme, dropout_prob = Mod_seq
-                new_block = ResNeXt_block(N_channels_in, N_channels_out, Bottleneck_d, stride, coding_scheme, dropout_prob, **kwargs)  
+                N_channels_in, N_channels_out, Bottleneck_d, stride, coding_scheme = Mod_seq
+                new_block = ResNeXt_block(N_channels_in, N_channels_out, Bottleneck_d, stride, coding_scheme, self.dropSubNNs_prob, **kwargs)  
                 List_Modules.append( new_block )
                 if new_block.ratio_active < 1:
                     self.num_codedBlocks += 1
@@ -104,17 +146,19 @@ class CodedResNeXt(nn.Module):
     # Forward
     #========= 
     def forward(self, x, targets, mask_subNNs_scheme = None): 
-        # The mask_subNNs_scheme is used only at test mode (when there is also no dropSubNN). Its possible values:
-        #     - a tupple (i, k, 'remove_active'): Then from the i-th ResNeXt block (starting the counting from 0)
-        #       k randomly chosen subNNs out of the set of 'active' for the classes will be removed. The set of
-        #       active is determined by seeing from 'targets' the class of the input image and choosing the 
-        #       corresponding subset from the coding scheme.
-        #     - a tupple (i, k, 'remove_inactive'): Then instead of 'active' is given then k subNNs will be randomly 
-        #       removed from the set of corresponding inactives ones. 
-        #     - a tupple ('all', 'remove_inactive'): Used to turn the NN into a binary classifier. Only the 
-        #       the subNNs dedicated to the corresponding classes of targets are not masked.
-        #     - None. No masking is applied
-        # In the training mode it is asserted to be None. 
+        '''
+        The mask_subNNs_scheme is used only at test mode (when there is also no dropSubNN). Its possible values:
+             - a tupple (i, k, 'remove_active'): Then from the i-th ResNeXt block (starting the counting from 0)
+               k randomly chosen subNNs out of the set of 'active' for the classes will be removed. The set of
+               active is determined by seeing from 'targets' the class of the input image and choosing the 
+               corresponding subset from the coding scheme.
+             - a tupple (i, k, 'remove_inactive'): Then instead of 'active' is given then k subNNs will be randomly 
+               removed from the set of corresponding inactives ones. 
+             - a tupple ('all', 'remove_inactive'): Used to turn the NN into a binary classifier. Only the 
+               the subNNs dedicated to the corresponding classes of targets are not masked.
+             - None. No masking is applied
+        In the training mode it is asserted to be None. 
+        '''
         assert not( self.training and mask_subNNs_scheme is not None)
         DecodeEnergies = []
         Losses_disentangle = []
