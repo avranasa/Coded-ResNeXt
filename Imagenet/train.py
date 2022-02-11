@@ -1,27 +1,9 @@
-'''
-We wrote the parts that were altered as:
-#=======================
-#Description of the code
-#=======================
-...coding lines
-...
-...
-...
-#=======================
-
-'''
-
-
-""" ImageNet Training Script
-This is intended to be a lean and easily modifiable ImageNet training script that reproduces ImageNet
-training results with some of the latest networks and training techniques. It favours canonical PyTorch
-and standard Python style over trying to be able to 'do it all.' That said, it offers quite a few speed
-and training result improvements over the usual PyTorch example scripts. Repurpose as you see fit.
-This script was started from an early version of the PyTorch ImageNet example
-(https://github.com/pytorch/examples/tree/master/imagenet)
-NVIDIA CUDA specific speedups adopted from NVIDIA Apex examples
-(https://github.com/NVIDIA/apex/tree/master/examples/imagenet)
-Hacked together by / Copyright 2020 Ross Wightman (https://github.com/rwightman)
+""" ImageNet Training Script used for the paper of Coded-ResNeXt
+It is a modified version from: https://github.com/rwightman/pytorch-image-models/tree/bits_and_tpu 
+The changes we incorporated are described like:
+#===================
+#blah blah blah
+#===================
 """
 import argparse
 import time
@@ -62,6 +44,48 @@ parser.add_argument('-c', '--config', default='', type=str, metavar='FILE',
 
 
 parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
+
+#The arguments we added/modified for Coded ResNeXt
+parser.add_argument('--model', default='Coded-ResNeXt-50', type=str, metavar='MODEL',
+                    help='Name of model to train (default: "Coded-ResNeXt-50"')
+parser.add_argument('--Control', action='store_true', default=False,
+                    help='Use baseline architecture (ResNeXt)')
+parser.add_argument('--Energy-normalization', action='store_false', default=True,
+                    help='Use of Energy Normalization step (default: True)')
+parser.add_argument('--Mask-grads', action='store_true', default=False,
+                    help='Mask the gradients according to the coding scheme. Could be used instead of coding loss (default: False)')
+parser.add_argument('--Same-code-Same-mask', action='store_false', default=True,
+                    help= 'If TRUE then every two consecutive ResNeXt blocks with the same coding scheme will \n' + \
+                          'also have the same dropout mask applied to them. Therefore out of N consecutive ResNeXt blocks \n' +\
+                          'with the same coding scheme it will be the first one drop_out_probability that counts (default: True)')
+parser.add_argument('--LossDisentangle-type', type=str, default='power4_threshold0.0',
+                    help='Coding Loss = diff(Energy_subNN, target_Energy, threshold)^power. The function diff  \n'+\
+                         'is: max{ |Energy_subNN-target_Energy|-threshold, 0} (default: power4_threshold0.0)')
+parser.add_argument('--Coef-LossDisentangle', type=float, default=1.0,
+                    help='The coefficient of the coding loss. In the paper it is denoted with $\mu$ (default: 1.0)')
+parser.add_argument('--dp-prob', type=float, default=0.1,
+                    help='The dropSubNN probability. In the paper it is denoted with $p_{drop}$ (default: 0.1)')
+parser.add_argument('--coding-ratio-per-stage', nargs= 4, type=str, default = ['32/32', '32/32', '16/32', '8/32'],
+                    help='The ratios of the coding schemes that are applied to all blocks of each stage. Assumption of using \n'+ \
+                         'Coded-ResNeXt which has 4 stages, so 4 inputs should be given. Default: 32/32 32/32 16/32 8/32.' )
+parser.add_argument('--only-eval',  action='store_true', default=False,
+                    help='If true then it does only one evaluation step. A checkpoint should be provided \n' +\
+                    'for loading the network (default: False)')
+parser.add_argument('--Remove-subNNs-from-block',  action='store_true', default=False,
+                    help='Used for generating the plot where subNNs are removed either from the set of active or  \n'+\
+                    'or from the set of inactive. Calls the function "test_print_acc_removing_subNNs" where the first \n'+\
+                    'two lines define from which block and how many subNNs will be removed. The default block is the 14th. \n'+\
+                    'A checkpoint should be provided for loading the network. (default: False)')
+parser.add_argument('--BinaryClassifier', type=int, default=-1, 
+                    help="Give the class for which its binary classifier will be evaluating. The output of the binary \n"+\
+                    'for every image in the evaluation set will be stored in a folder in the output path.')     
+
+
+parser.add_argument('--output', default='/', type=str, metavar='PATH',
+                    help='path to output folder (default my drive)')
+parser.add_argument('--experiment', default='new_experiment', type=str, metavar='NAME',
+                    help='name of train experiment, name of sub-folder for output')
+
 
 # Dataset parameters
 parser.add_argument('data_dir', metavar='DIR',
@@ -280,89 +304,6 @@ parser.add_argument('--log-wandb', action='store_true', default=False,
 
 
 
-# ======================================
-# Additional for Coded-ResNeXt arguments
-# ======================================
-#'conv7_in3_out64_str2' means a convolution layer with kernel_size (7,7) with stride=2
-#                       input's number of channels is 3 and output's is 64
-#Τhe last linear has the number output features equal to the number of classes
-#avgPoolWithMean is an 2D average pool. For input (N,C,H,W) it outputs (N,C)
-#maxPool3_str2_pad1 is a maxPool layer with stride 2, padding 1 and kernel_size (3,3)
-#dropOut_SubNN is applied only if the coding is 'M/N' with M<N
-#
-#The notation regarding the architecture is the following. Each list represents a block as:
-#[Channels_in, Channels_out, Bottleneck_width, stride of the second convolutional, coding ratio] 
-
-d=4
-stage3 ='16/32'
-stage4 = '8/32'
-ARCHITECTURE_IMAGENET = [   
-                        #stem, Input resolution [224,224] / [160,160]
-                        'conv7_in3_out64_str2', 'bn2D_in64', 'relu', 'maxPool3_str2_pad1',
-                        #stage 1 
-                        [  64, 256, d, 1, '32/32' ],#Index Block: 0, Resolution [56,56] / [40,40]
-                        [ 256, 256, d, 1, '32/32' ],
-                        [ 256, 256, d, 1, '32/32' ],                         
-                        #stage 2
-                        [ 256, 512, 2*d, 2, '32/32' ],  #Index Block: 3, Resolution [28,28] / [20,20]
-                        [ 512, 512, 2*d, 1, '32/32' ],  
-                        [ 512, 512, 2*d, 1, '32/32' ],  
-                        [ 512, 512, 2*d, 1, '32/32' ],  
-                        #stage 3
-                        [  512, 1024, 4*d, 2, stage3 ],  #Index Block: 7, Resolution [14,14] / [10,10]
-                        [ 1024, 1024, 4*d, 1, stage3 ],  
-                        [ 1024, 1024, 4*d, 1, stage3 ],    
-                        [ 1024, 1024, 4*d, 1, stage3 ],  #Index Block: 10
-                        [ 1024, 1024, 4*d, 1, stage3 ],  
-                        [ 1024, 1024, 4*d, 1, stage3 ],        
-                        #stage 4   
-                        [ 1024, 2048, 8*d, 2,  stage4 ], #Index Block: 13, Resolution [7,7] / [5,5]
-                        [ 2048, 2048, 8*d, 1,  stage4 ],  
-                        [ 2048, 2048, 8*d, 1,  stage4 ],  
-                        #Last layers
-                        'avgPoolWithMean','linear_in2048' 
-                        ]
-
-
-parser.add_argument('--Control', action='store_true', default=False,
-                    help='Use baseline architecture (ResNeXt)')
-parser.add_argument('--Energy-normalization', action='store_false', default=True,
-                    help='Use of Energy Normalization step (default: True)')
-parser.add_argument('--Mask-grads', action='store_true', default=False,
-                    help='Mask the gradients according to the coding scheme. Could be used instead of coding loss (default: False)')
-parser.add_argument('--Same-code-Same-mask', action='store_false', default=True,
-                    help= 'If TRUE then every two consecutive ResNeXt blocks with the same coding scheme will \n' + \
-                          'also have the same dropout mask applied to them. Therefore out of N consecutive ResNeXt blocks \n' +\
-                          'with the same coding scheme it will be the first one drop_out_probability that counts (default: True)')
-parser.add_argument('--LossDisentangle-type', type=str, default='power4_threshold0.0',
-                    help='Coding Loss = diff(Energy_subNN, target_Energy, threshold)^power. The function diff  \n'+\
-                         'is: max{ |Energy_subNN-target_Energy|-threshold, 0} (default: power4_threshold0.0)')
-parser.add_argument('--Coef-LossDisentangle', type=float, default=1.0,
-                    help='The coefficient of the coding loss. In the paper it is denoted with $\mu$ (default: 1.0)')
-parser.add_argument('--dp-prob', type=float, default=0.1,
-                    help='The dropSubNN probability. In the paper it is denoted with $p_{drop}$ (default: 0.1)')
-parser.add_argument('--only-eval',  action='store_true', default=False,
-                    help='If true then it does only one evaluation step. A checkpoint should be provided \n' +\
-                    'for loading the network (default: False)')
-parser.add_argument('--Remove-subNNs-from-block',  action='store_true', default=False,
-                    help='Used for generating the plot where subNNs are removed either from the set of active or  \n'+\
-                    'or from the set of inactive. Calls the function "test_print_acc_removing_subNNs" where the first \n'+\
-                    'two lines define from which block and how many subNNs will be removed. The default block is the 14th. \n'+\
-                    'A checkpoint should be provided for loading the network. (default: False)')
-parser.add_argument('--BinaryClassifier', type=int, default=-1, 
-                    help="Give the class for which its binary classifier will be evaluating. The output of the binary \n"+\
-                    'for every image in the evaluation set will be stored in a folder in the output path.')
-                    
-parser.add_argument('--model', default='Coded-ResNeXt-50', type=str, metavar='MODEL',
-                    help='Name of model to train (default: "Coded-ResNeXt-50"')
-parser.add_argument('--output', default='/', type=str, metavar='PATH',
-                    help='path to output folder (default my drive)')
-parser.add_argument('--experiment', default='new_experiment', type=str, metavar='NAME',
-                    help='name of train experiment, name of sub-folder for output')
-#================================
-
-
-
 def _parse_args():
     # Do we have a config file to parse?
     args_config, remaining = config_parser.parse_known_args()
@@ -387,16 +328,8 @@ def main():
     dev_env = initialize_device(force_cpu=args.force_cpu, amp=args.amp, channels_last=args.channels_last)
 
     #================================
-    #Adding dropout subNN probability.
-    #Printing the necessary information.
+    #Printing relevant information.
     #================================
-    architecture = deepcopy(ARCHITECTURE_IMAGENET)
-    for block in architecture:  
-        if not isinstance(block,list): continue
-        N_subNN_active, N_subNNs_total = block[-1].split('/')
-        block.append(0.0)
-        if int(N_subNN_active) < int(N_subNNs_total): block[-1]=args.dp_prob
-
     if dev_env.primary:
         print('===============================')
         print('Your arguments for the experiment -',args.experiment,'- are:')
@@ -407,13 +340,11 @@ def main():
         print('     Coef_LossDisentangle: ',args.Coef_LossDisentangle)
         print('     Dropout SubNN prob. : ',args.dp_prob)
         print('     Mask_grads: ', args.Mask_grads)
-        print('The architecture is:')
-        for bl in architecture:
-            print(bl)
+        print('     Coding Ratios per stage:', args.coding_ratio_per_stage)
         print('Saving at directory: ', args.output)
         print('And the experiment name: ', args.experiment)
         print('===============================')
-    
+
     if args.Remove_subNNs_from_block or (args.BinaryClassifier>=0):
         args.only_eval = True
     #================================
@@ -431,11 +362,10 @@ def main():
     mixup_active = args.mixup > 0 or args.cutmix > 0. or args.cutmix_minmax is not None
     assert args.aug_splits == 0 or args.aug_splits > 1, 'A split of 1 makes no sense'
 
-    train_state = setup_train_task(args, dev_env, mixup_active, architecture)
+    train_state = setup_train_task(args, dev_env, mixup_active)
     train_cfg = train_state.train_cfg
 
     # Set random seeds across ranks differently for train
-    # FIXME perhaps keep the same and just set diff seeds for dataloader worker process? what about TFDS?
     random_seed(args.seed, dev_env.global_rank)
 
     data_config, loader_eval, loader_train = setup_data(
@@ -585,24 +515,23 @@ def main():
         _logger.info('*** Best metric: {0} (epoch {1})'.format(best_metric, best_epoch))
 
 
-def setup_train_task(args, dev_env: DeviceEnv, mixup_active: bool, architecture: list):
-    #======================
-    #Creating the model
-    #======================
+def setup_train_task(args, dev_env: DeviceEnv, mixup_active: bool):
+    #===================================
+    #Creating the (Coded-)ResNeXt model
+    #===================================
     model = create_CodedResNeXt(
         Energy_normalization=args.Energy_normalization,
         Mask_grads = args.Mask_grads,
         Same_code_Same_mask = args.Same_code_Same_mask,
         LossDisentangle_type = args.LossDisentangle_type,
         Control = args.Control,
-        Architecture = architecture,
-        checkpoint_path=args.initial_checkpoint,
+        coding_ratio_per_stage = args.coding_ratio_per_stage,
+        checkpoint_path = args.initial_checkpoint,
     )
-    #=====================  
 
     if args.num_classes is None:
         assert hasattr(model, 'num_classes'), 'Model must have `num_classes` attr if not set on cmd line/config.'
-        args.num_classes = model.num_classes  # FIXME handle model default vs config num_classes more elegantly
+        args.num_classes = model.num_classes  
 
     if dev_env.primary:
         _logger.info(
@@ -628,7 +557,6 @@ def setup_train_task(args, dev_env: DeviceEnv, mixup_active: bool, architecture:
     )
 
     # setup learning rate schedule and starting epoch
-    # FIXME move into updater?
     lr_scheduler, num_epochs = create_scheduler(args, train_state.updater.optimizer)
     if lr_scheduler is not None and train_state.epoch > 0:
         lr_scheduler.step(train_state.epoch)
@@ -762,7 +690,6 @@ def setup_data(args, default_cfg, dev_env: DeviceEnv, mixup_active: bool):
 
     eval_workers = args.workers
     if 'tfds' in args.dataset:
-        # FIXME reduces validation padding issues when using TFDS w/ workers and distributed training
         eval_workers = min(2, args.workers)
 
     loader_eval = create_loader_v2(
@@ -784,12 +711,10 @@ def train_one_epoch(
         dev_env: DeviceEnv,
         coef_loss_dis,
     ):
-    #==========================================
-    # Performing one training epoch.
-    # We added some additional metric trackers
-    # and we adapted the code to account for the 
-    # additional outputs of the model
-    #==========================================
+    #=================================================================
+    # Performing one training epoch. Added more metric trackers.  
+    # The model must be a (Coded-)ResNeXt which has multiple outputs.
+    #=================================================================
     tracker = Tracker()
     loss_class_meter = AvgTensor()
     loss_disTotal_meter = AvgTensor()
@@ -828,7 +753,6 @@ def train_one_epoch(
         )
 
         tracker.mark_iter()
-    #==============================
 
     if hasattr(state.updater.optimizer, 'sync_lookahead'):
         state.updater.optimizer.sync_lookahead()
@@ -861,10 +785,9 @@ def after_train_step(
     end_step = step_idx == step_end_idx
 
     with torch.no_grad():
-        #==================================================
-        #Slightly changed to track some additional metrics.
-        #Also we commented the part of saving a checkpoint.
-        #==================================================
+        #=========================================================================
+        # Tracking additional metrics. Commented the part of saving a checkpoint.
+        #=========================================================================
         output, loss_disentangle_total, Losses_disentangle, target, loss_class =  tensors
         loss_class_meter.update(loss_class, output.shape[0])
         loss_disTotal_meter.update(loss_disentangle_total, output.shape[0])
@@ -873,7 +796,6 @@ def after_train_step(
 
 
         if state.model_ema is not None:
-            # FIXME should ema update be included here or in train / updater step? does it matter?
             state.model_ema.update(state.model)
 
         state = replace(state, step_count_global=state.step_count_global + 1)
@@ -892,16 +814,13 @@ def after_train_step(
                     rate=tracker.get_avg_iter_rate(global_batch_size),
                     lr=lr_avg,
                 )            
-
         '''
         if services.checkpoint is not None and cfg.recovery_interval and (
                 end_step or (step_idx + 1) % cfg.recovery_interval == 0):
             services.checkpoint.save_recovery(state.epoch, batch_idx=step_idx)
         '''
-        #================================================
 
         if state.lr_scheduler is not None:
-            # FIXME perform scheduler update here or via updater after_step call?
             state.lr_scheduler.step_update(num_updates=state.step_count_global)
 
 
@@ -915,14 +834,14 @@ def evaluate(
         log_interval: int = 10,
     ):
     
-    #=====================================================
-    #Performing one evaluation step at the end of an epoch.
-    #Slightly changed to track more additional metrics.
-    #=====================================================
+    #=========================================================
+    # The model must be a (Coded-)ResNeXt which has multiple 
+    # outputs. Additional tracking metrics are printed/logged.
+    #=========================================================
 
     tracker = Tracker()
     losses_class_meter = AvgTensor()
-    accuracy_m = AccuracyTopK()  # FIXME move loss and accuracy modules into task specific TaskMetric obj
+    accuracy_m = AccuracyTopK()  
     loss_disTotal_meter = AvgTensor()
     List_loss_disentangle_meter = [AvgTensor() for _ in range(model.num_codedBlocks)]
     List_decodeEnergies_acc = [AccuracyTopK(topk=(1,)) for _ in range(model.num_codedBlocks)]
@@ -942,17 +861,10 @@ def evaluate(
                     output = output[0]
                 loss_class = loss_fn(output, target)
 
-            # FIXME, explictly marking step for XLA use since I'm not using the parallel xm loader
-            # need to investigate whether parallel loader wrapper is helpful on tpu-vm or only use for 2-vm setup.
             if dev_env.type_xla:
                 dev_env.mark_step()
             elif dev_env.type_cuda:
                 dev_env.synchronize()
-
-            # FIXME uncommenting this fixes race btw model `output`/`loss` and loss_m/accuracy_m meter input
-            # for PyTorch XLA GPU use.
-            # This issue does not exist for normal PyTorch w/ GPU (CUDA) or PyTorch XLA w/ TPU.
-            # loss.item()
 
             tracker.mark_iter_step_end()
             losses_class_meter.update(loss_class, output.size(0))
@@ -996,7 +908,7 @@ def evaluate(
     top1, top5 = accuracy_m.compute().values()
     results = OrderedDict([('loss', losses_class_meter.compute().item()), ('top1', top1.item()), ('top5', top5.item())])
     results.update(Additional_results)
-    #=====================================================
+    
     return results
 
 
