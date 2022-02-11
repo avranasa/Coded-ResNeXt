@@ -4,7 +4,7 @@ import math
 import random
 import torch.nn.functional as F
 from collections import OrderedDict
-from subNNs_codes import *
+from subNNs_codes import  SUBNNS_CODING_IMAGENET
 import sys
 
 
@@ -157,11 +157,11 @@ class ResNeXt_block(nn.Module):
 
 
     def decodeFromEnergies(self, energy_per_subNN):
-        E = energy_per_subNN.unsqueeze(dim=1)#dim = [BatchSize,1,N_subNNs]    
+        E = energy_per_subNN.unsqueeze(dim=1)   #dim = [BatchSize,1,N_subNNs]    
         E = E / E.sum(dim=2,keepdim=True) * self.N_subNNs_active
-        M = 1.0*self.Mask_perClass.unsqueeze(dim=0)#dim = [1,N_classes,N_subNNs]
+        M = 1.0*self.Mask_perClass.unsqueeze(dim=0)   #dim = [1,N_classes,N_subNNs]
         # Compute the distance of signal E to all codewords of mask M.        
-        dist = torch.mean( (E-M)**2, dim=2).sqrt()#dim = [BatchSize,N_classes] #/self.N_subNNs
+        dist = torch.mean( (E-M)**2, dim=2).sqrt()  #dim = [BatchSize,N_classes] #/self.N_subNNs
         
         #Choose the minimum distance. Used Softmin (even though unnecessare) to be in the spirit of classification 
         confidence = F.softmax( -dist, dim=1)# the minus so as afterwards to take the softmin
@@ -185,12 +185,12 @@ class ResNeXt_block(nn.Module):
             return (mask*x).sum(dim=1), {'code_name':self.coding_scheme_name,  'mask':mask}
 
 
-    def interpretability_operations(self, x, targets, mask_subNNs_scheme, mask_dp_info=None):
+    def coded_ResNeXt_operations(self, x, targets, mask_subNNs_scheme, mask_dp_info=None):
         maskActiveSubNNs = self.Mask_perClass[targets]
         BatchSize, C, H, W = x.shape 
         x = x.view(BatchSize,  self.N_subNNs, -1, H, W)
 
-        #Masking for the interpretability plots. Used in test/evaluation time.
+        #Masking subNNs for the interpretability plots. Used in test/evaluation time.
         if mask_subNNs_scheme is not None:
             if mask_subNNs_scheme[0] == 'all':
                 x = self.mask_all_inactive(x, targets)
@@ -224,8 +224,9 @@ class ResNeXt_block(nn.Module):
         x = self.conv_internal(x) 
         x = F.relu(self.bn_internal(x), inplace=True)
         x = self.conv_expand(x)   
+        #Coded ResNeXt operations only if the ratio of coding scheme is smaller than 1
         if self.ratio_active < 1:    
-            x, loss_disentangle, decodingEnergies, mask_dp_info = self.interpretability_operations(x, targets, mask_subNNs_scheme, mask_dp_info) 
+            x, loss_disentangle, decodingEnergies, mask_dp_info = self.coded_ResNeXt_operations(x, targets, mask_subNNs_scheme, mask_dp_info) 
         else:
             loss_disentangle, decodingEnergies = None, None   
         x = self.bn_expand(x)
@@ -234,4 +235,3 @@ class ResNeXt_block(nn.Module):
         
         return x, loss_disentangle, decodingEnergies, mask_dp_info
         
-
