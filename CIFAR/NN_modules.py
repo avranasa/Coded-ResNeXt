@@ -190,7 +190,7 @@ class ResNeXt_block(nn.Module):
             return mask*x, {'code_name':self.coding_scheme_name,  'mask':mask}
 
 
-    def interpretability_operations(self, x, targets, mask_subNNs_scheme, mask_dp_info=None):
+    def coded_ResNeXt_operations(self, x, targets, mask_subNNs_scheme, mask_dp_info=None):
         maskActiveSubNNs = self.Mask_perClass[targets]
         BatchSize, C, H, W = x.shape 
         x = x.view(BatchSize,  self.N_subNNs, -1, H, W)
@@ -227,7 +227,7 @@ class ResNeXt_block(nn.Module):
         x = F.relu(self.bn_internal(x), inplace=True)
         x = self.conv_expand(x)   
         if self.ratio_active < 1:    
-            x, loss_disentangle, decodingEnergies, mask_dp_info = self.interpretability_operations(x, targets, mask_subNNs_scheme, mask_dp_info) 
+            x, loss_disentangle, decodingEnergies, mask_dp_info = self.coded_ResNeXt_operations(x, targets, mask_subNNs_scheme, mask_dp_info) 
         else:
             loss_disentangle, decodingEnergies = None, None   
         x = self.bn_expand(x)
