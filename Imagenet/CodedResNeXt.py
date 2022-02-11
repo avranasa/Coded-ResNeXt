@@ -53,7 +53,8 @@ class CodedResNeXt(nn.Module):
                         #Last layers
                         'avgPoolWithMean','linear_in2048' ]
 
-        self.dropSubNNs_prob = kwargs.get('dp_prob')
+        
+        self.dropSubNNs_prob = kwargs.get('dropSubNNs_prob')
         self.num_classes = 1000
         self.default_cfg = {'architecture':self.architecture,
                            'control':self.control}
